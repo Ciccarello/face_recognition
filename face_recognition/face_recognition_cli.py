@@ -49,7 +49,7 @@ def get_best_result():
 
 def print_top_results(amount_to_display, known_people_folder):
     try:
-        print ('\nTest file', str(results_list[0][0]), 'is most likely', str(results_list[0][1]), '\n') #Display the top result
+        # print ('\nTest file', str(results_list[0][0]), 'is most likely', str(results_list[0][1]), '\n') #Display the top result
         print('Best Guess: ' + results_list[0][1])
         try: #Try the best guess as a png
             display_new_image(known_people_folder+'/'+results_list[0][1]+'.png', 'Best Guess: ' + results_list[0][1]) #Display the best guess photo
@@ -62,14 +62,14 @@ def print_top_results(amount_to_display, known_people_folder):
         print ('The top', str(amount_to_display), 'results were:') #Display results of comparison
         for i in range(amount_to_display):
             try: #Try each incorrect image as png
-                print_result('', results_list[i][1], results_list[i][2], True)
                 if i != 0: display_new_image(known_people_folder+'/'+results_list[i][1]+'.png', 'Guess' + str(i+1) + ': ' + results_list[i][1])
+                print_result('', results_list[i][1], results_list[i][2], True)
             except:
                 try: #Try each incorrect image as jpg
-                    print_result('', results_list[i][1], results_list[i][2], True)
                     if i != 0: display_new_image(known_people_folder+'/'+results_list[i][1]+'.jpg', 'Guess' + str(i+1) + ': ' + results_list[i][1])
+                    print_result('', results_list[i][1], results_list[i][2], True)
                 except:
-                    print('It wasnt jpg or png, what even is it then? Version 2.0')
+                    print('It wasnt jpg or png, what even is it then?')
     except:
         print('Error printing results')
 
@@ -78,7 +78,7 @@ def add_to_results(filename, name, distance):
     results_list.append((filename, name, distance))
 
 
-def test_image(image_to_check, known_names, known_face_encodings, known_people_folder, tolerance=0.6, show_distance=False, verbose=False, number_of_results_to_display=3):
+def test_image(image_to_check, known_names, known_face_encodings, known_people_folder, number_of_results_to_display, tolerance=0.6, show_distance=False, verbose=False):
     unknown_image = face_recognition.load_image_file(image_to_check)
 
     # Scale down image if it's giant so things run a little faster
@@ -107,6 +107,7 @@ def test_image(image_to_check, known_names, known_face_encodings, known_people_f
     results_list.sort(key=lambda x: x[2]) #Sorts list using the distance value
 
     if (verbose): print_top_results(number_of_results_to_display, known_people_folder)
+    return(results_list[0])
 
 def image_files_in_folder(folder):
     return [os.path.join(folder, f) for f in os.listdir(folder) if re.match(r'.*\.(jpg|jpeg|png)', f, flags=re.I)]
@@ -176,32 +177,24 @@ def fit(cpus, tolerance, show_distance, number_of_results_to_display, train, nam
     known_names, known_face_encodings = scan_known_people(train)
     return known_names, known_face_encodings
 
-def predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings):
+def predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings, verbose):
+    best_match =  ""
     if(image_to_check != ''):
-        if (number_of_results_to_display < 0):
-            number_of_results_to_display = 0
-        if (number_of_results_to_display == 0):
-            verbose = False
-        else:
-            verbose = True
-
-
         display_new_image(image_to_check, 'Unknown Person')
-
         # Multi-core processing only supported on Python 3.4 or greater
         if os.path.isdir(image_to_check):
             if cpus == 1:
-                [test_image(image_file, known_names, known_face_encodings, known_people_folder, tolerance, show_distance, verbose, number_of_results_to_display) for image_file in image_files_in_folder(image_to_check)]
+                best_match = [test_image(image_file, known_names, known_face_encodings, known_people_folder, number_of_results_to_display, tolerance, show_distance, verbose) for image_file in image_files_in_folder(image_to_check)]
             else:
                 process_images_in_process_pool(image_files_in_folder(image_to_check), known_names, known_face_encodings, cpus, tolerance, show_distance)
         else:
-            test_image(image_to_check, known_names, known_face_encodings, known_people_folder, tolerance, show_distance, verbose, number_of_results_to_display)
+            best_match = test_image(image_to_check, known_names, known_face_encodings, known_people_folder, number_of_results_to_display, tolerance, show_distance, verbose)
 
-        print(get_best_result())
+        # print(get_best_result())
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    return 2
+    return best_match
 
 
 
@@ -221,6 +214,13 @@ def predict(cpus, tolerance, show_distance, number_of_results_to_display, known_
 @click.option('-i', '--image_to_check', default='', type=str, help="Enables test for image recognition.")
 
 def main(cpus, tolerance, show_distance, number_of_results_to_display, train, names_output_file, encodings_output_file, load_names_file, load_encodings_file, not_trained_known_person_folder, image_to_check):
+    if (number_of_results_to_display < 0):
+        number_of_results_to_display = 0
+    if (number_of_results_to_display == 0):
+        verbose = False
+    else:
+        verbose = True
+
     if (sys.version_info < (3, 4)) and cpus != 1:
         click.echo('WARNING: Multi-processing support requires Python 3.4 or greater. Falling back to single-threaded processing!')
         cpus = 1
@@ -242,11 +242,12 @@ def main(cpus, tolerance, show_distance, number_of_results_to_display, train, na
         else:
             print("ERROR: How did you get here. I'm going to break thanks to your bad judgement.")
 
-        print(image_to_check)
         if(image_to_check != ''):
             if (not_trained_known_person_folder != ''): known_people_folder = not_trained_known_person_folder
             else: known_people_folder = train
-            predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings)
+            print(predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings, verbose))
+            # return predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings)
+            #Returns best match
 
 if __name__ == '__main__':
     print(main())
