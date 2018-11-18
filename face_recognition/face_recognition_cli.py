@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#/usr/local/lib/python3.5/dist-packages/face_recognition/face_recognition_cli.py
 from __future__ import print_function
 import click
 import os
@@ -12,26 +13,46 @@ import numpy as np
 import cv2
 from array import array
 import json
+from shutil import copy2
 
 results_list = []
 
-def scan_known_people(known_people_folder):
-    known_names = []
-    known_face_encodings = []
-    for file in image_files_in_folder(known_people_folder):
-        basename = os.path.splitext(os.path.basename(file))[0]
-        img = face_recognition.load_image_file(file)
+def scan_known_people(known_people_folder, known_names, known_face_encodings, append_persons_folder):
 
-        encodings = face_recognition.face_encodings(img)
-        if len(encodings) > 1:
-            click.echo('WARNING: More than one face found in {}. Only considering the first face.'.format(file))
-
-        if len(encodings) == 0:
-            click.echo('WARNING: No faces found in {}. Ignoring file.'.format(file))
+    for file in image_files_in_folder(known_people_folder if append_persons_folder == '' else append_persons_folder):
+        if(append_persons_folder != ''):
+            if((os.path.isfile(os.path.join(known_people_folder, os.path.basename(file)))) is False):
+                copy2(file, known_people_folder)
+                temp = scan_individual_person(file)
+                if temp is not None:
+                    basename, encodings = temp
+                    known_names.append(basename)
+                    known_face_encodings.append(encodings[0])
+            else:
+                print("Files not appended because they are already present")
         else:
-            known_names.append(basename)
-            known_face_encodings.append(encodings[0])
+            temp = scan_individual_person(file)
+            if temp is not None:
+                basename, encodings = temp
+                known_names.append(basename)
+                known_face_encodings.append(encodings[0])
     return known_names, known_face_encodings
+
+def scan_individual_person(file):
+    basename = os.path.splitext(os.path.basename(file))[0]
+    img = face_recognition.load_image_file(file)
+
+    encodings = face_recognition.face_encodings(img)
+    if len(encodings) > 1:
+        click.echo('WARNING: More than one face found in {}. Only considering the first face.'.format(file))
+
+    if len(encodings) == 0:
+        click.echo('WARNING: No faces found in {}. Ignoring file.'.format(file))
+    else:
+        return basename, encodings
+
+# def duplicate_file(known_people_folder, file):
+
 
 
 def print_result(filename, name, distance, show_distance=False):
@@ -151,7 +172,7 @@ def save_training_data(known_names, known_face_encodings, names_output_file, enc
 
     #encodings saving
     for i in range(len(known_face_encodings)):
-        known_face_encodings[i] = known_face_encodings[i].tolist()
+        if(isinstance(known_face_encodings[i], np.ndarray)): known_face_encodings[i] = known_face_encodings[i].tolist()
     file = open(encodings_output_file, "w")
     json.dump(known_face_encodings, file)
     file.close()
@@ -173,8 +194,8 @@ def load_training_data(load_names_file, load_encodings_file):
     return known_names, known_face_encodings
 
 
-def fit(cpus, tolerance, show_distance, number_of_results_to_display, train, names_output_file, encodings_output_file, image_to_check):
-    known_names, known_face_encodings = scan_known_people(train)
+def fit(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, names_output_file, encodings_output_file, image_to_check, known_names, known_face_encodings, append_persons_folder):
+    known_names, known_face_encodings = scan_known_people(known_people_folder, known_names, known_face_encodings, append_persons_folder)
     return known_names, known_face_encodings
 
 def predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings, verbose):
@@ -206,6 +227,7 @@ def predict(cpus, tolerance, show_distance, number_of_results_to_display, known_
 @click.option('--show-distance', default=False, type=bool, help='Output face distance. Useful for tweaking tolerance setting.')
 @click.option('-n', '--number-of-results-to-display', default=0, type=int, help='If verbose move is active, displays the number top X results. This does not affect the returned valued.')
 @click.option('-t', '--train', default='', type=str, help="Enables training. Location of training material.")
+@click.option('-a', '--append_persons_folder', default='', type=str, help="Enables appending previously compiled encodings file. Provides location of new images to compile.")
 @click.option('-o', '--names_output_file', default='', type=str, help="Enables saving of training output data.")
 @click.option('-e', '--encodings_output_file', default='', type=str, help="Enables saving of training output data.")
 @click.option('-l', '--load-names-file', default='', type=str, help="Loads pre-calculated training results")
@@ -213,7 +235,7 @@ def predict(cpus, tolerance, show_distance, number_of_results_to_display, known_
 @click.option('-m', '--not-trained-known-person-folder', default='', type=str, help="known person folder if using pre-calculated data. This is used because the normal known person folder triggers training.")
 @click.option('-i', '--image_to_check', default='', type=str, help="Enables test for image recognition.")
 
-def main(cpus, tolerance, show_distance, number_of_results_to_display, train, names_output_file, encodings_output_file, load_names_file, load_encodings_file, not_trained_known_person_folder, image_to_check):
+def main(cpus, tolerance, show_distance, number_of_results_to_display, train, append_persons_folder, names_output_file, encodings_output_file, load_names_file, load_encodings_file, not_trained_known_person_folder, image_to_check):
     if (number_of_results_to_display < 0):
         number_of_results_to_display = 0
     if (number_of_results_to_display == 0):
@@ -225,29 +247,34 @@ def main(cpus, tolerance, show_distance, number_of_results_to_display, train, na
         click.echo('WARNING: Multi-processing support requires Python 3.4 or greater. Falling back to single-threaded processing!')
         cpus = 1
 
-    if((load_names_file != '') and (train != '')):
-        print("ERROR: -t and -l cannot both be selected.")
-    elif((load_names_file == '') and (train == '')):
-        print("ERROR: -t or -l must be selected.")
+    # if((load_names_file != '') and (train != '')):
+    #     print("ERROR: -t and -l cannot both be selected.")
+    # elif((load_names_file == '') and (train == '')):
+    #     print("ERROR: -t or -l must be selected.")
+    # else:
+    if(train != ''): #training instead of loading data
+        known_people_folder = train
+        known_names, known_face_encodings = [],[]
+        if((append_persons_folder != '') and (load_names_file != '') and (load_encodings_file != '')):
+            known_names, known_face_encodings = load_training_data(load_names_file, load_encodings_file) #Overrides empty name encodings with preloaded ones
+            names_output_file, encodings_output_file = load_names_file, load_encodings_file #Enables overriding previous saved encodings with appended data
+        elif(append_persons_folder != ''): print("No precompiled names and encodings files specified when requesting appending. Appending disabled. Scanning normally.")
+        known_names, known_face_encodings = fit(cpus, tolerance, show_distance, number_of_results_to_display, train, names_output_file, encodings_output_file, image_to_check, known_names, known_face_encodings, append_persons_folder)
+
+        #save training data if -o and -e are used
+        if((names_output_file != '') and (encodings_output_file != '')):
+            save_training_data(known_names, known_face_encodings, names_output_file, encodings_output_file)
+    elif(load_names_file != ''): #loading data instead of training
+        known_names, known_face_encodings = load_training_data(load_names_file, load_encodings_file)
     else:
-        if(train != ''): #training instead of loading data
-            known_people_folder = train
-            known_names, known_face_encodings = fit(cpus, tolerance, show_distance, number_of_results_to_display, train, names_output_file, encodings_output_file, image_to_check)
+        print("ERROR: How did you get here. I'm going to break thanks to your bad judgement.")
 
-            #save training data if -o and -e are used
-            if((names_output_file != '') and (encodings_output_file != '')):
-                save_training_data(known_names, known_face_encodings, names_output_file, encodings_output_file)
-        elif(load_names_file != ''): #loading data instead of training
-            known_names, known_face_encodings = load_training_data(load_names_file, load_encodings_file)
-        else:
-            print("ERROR: How did you get here. I'm going to break thanks to your bad judgement.")
-
-        if(image_to_check != ''):
-            if (not_trained_known_person_folder != ''): known_people_folder = not_trained_known_person_folder
-            else: known_people_folder = train
-            print(predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings, verbose))
-            # return predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings)
-            #Returns best match
+    if(image_to_check != ''):
+        if (not_trained_known_person_folder != ''): known_people_folder = not_trained_known_person_folder
+        else: known_people_folder = train
+        print(predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings, verbose))
+        # return predict(cpus, tolerance, show_distance, number_of_results_to_display, known_people_folder, image_to_check, known_names, known_face_encodings)
+        #Returns best match
 
 if __name__ == '__main__':
     print(main())
